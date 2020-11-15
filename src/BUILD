@@ -128,6 +128,7 @@ cc_library(
         "include/"
     ],
     deps = [
+        "@com_google_absl//absl/types:optional",
         ":http_template",
     ],
 )

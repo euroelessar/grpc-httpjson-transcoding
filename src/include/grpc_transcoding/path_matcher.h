@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "absl/types/optional.h"
 #include "http_template.h"
 #include "path_matcher_node.h"
 
@@ -42,6 +43,10 @@ enum class UrlUnescapeSpec {
   kAllCharactersExceptSlash,
   // URL path parameters will be fully URI-decoded.
   kAllCharacters,
+  // It is an implementation detail, do not use it.
+  // Use query value decoding rules, replace plus sign by space and escape all
+  // %-encoded charachters.
+  kInternalQueryValue,
 };
 
 // The immutable, thread safe PathMatcher stores a mapping from a combination of
@@ -222,8 +227,9 @@ inline int hex_digit_to_int(char c) {
 //
 // If the next three characters are an escaped character then this function will
 // also return what character is escaped.
-bool GetEscapedChar(const std::string& src, size_t i,
-                    UrlUnescapeSpec unescape_spec, char* out) {
+absl::optional<size_t> GetEscapedChar(const std::string& src, size_t i,
+                                      UrlUnescapeSpec unescape_spec,
+                                      char* out) {
   if (i + 2 < src.size() && src[i] == '%') {
     if (ascii_isxdigit(src[i + 1]) && ascii_isxdigit(src[i + 2])) {
       char c =
@@ -231,22 +237,28 @@ bool GetEscapedChar(const std::string& src, size_t i,
       switch (unescape_spec) {
         case UrlUnescapeSpec::kAllCharactersExceptReserved:
           if (IsReservedChar(c)) {
-            return false;
+            return absl::nullopt;
           }
           break;
         case UrlUnescapeSpec::kAllCharactersExceptSlash:
           if (c == '/') {
-            return false;
+            return absl::nullopt;
           }
           break;
         case UrlUnescapeSpec::kAllCharacters:
           break;
+        case UrlUnescapeSpec::kInternalQueryValue:
+          break;
       }
       *out = c;
-      return true;
+      return 3;
     }
+  } else if (unescape_spec == UrlUnescapeSpec::kInternalQueryValue &&
+             src[i] == '+') {
+    *out = ' ';
+    return 1;
   }
-  return false;
+  return absl::nullopt;
 }
 
 // Unescapes string 'part' and returns the unescaped string. Reserved characters
@@ -275,9 +287,11 @@ std::string UrlUnescapeString(const std::string& part,
   char* p = begin;
 
   for (size_t i = 0; i < part.size();) {
-    if (GetEscapedChar(part, i, unescape_spec, &ch)) {
+    const absl::optional<size_t> skip =
+        GetEscapedChar(part, i, unescape_spec, &ch);
+    if (skip) {
       *p++ = ch;
-      i += 3;
+      i += *skip;
     } else {
       *p++ = part[i];
       i += 1;
@@ -349,8 +363,9 @@ void ExtractBindingsFromQueryParameters(
         // in the request, e.g. `book.author.name`.
         VariableBinding binding;
         split(name, '.', binding.field_path);
-        binding.value = UrlUnescapeString(param.substr(pos + 1),
-                                          UrlUnescapeSpec::kAllCharacters);
+        std::string value = param.substr(pos + 1);
+        binding.value =
+            UrlUnescapeString(value, UrlUnescapeSpec::kInternalQueryValue);
         bindings->emplace_back(std::move(binding));
       }
     }

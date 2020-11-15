@@ -727,9 +727,9 @@ TEST_F(PathMatcherTest, VariableBindingsWithQueryParams) {
   EXPECT_NE(nullptr, a_b_c);
 
   Bindings bindings;
-  EXPECT_EQ(LookupWithParams("GET", "/a", "x=hello", &bindings), a);
+  EXPECT_EQ(LookupWithParams("GET", "/a", "x=hello+world%2b", &bindings), a);
   EXPECT_EQ(Bindings({
-                Binding{FieldPath{"x"}, "hello"},
+                Binding{FieldPath{"x"}, "hello world+"},
             }),
             bindings);
 
